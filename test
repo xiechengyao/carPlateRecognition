@@ -1,0 +1,73 @@
+import sys
+reload(sys)
+sys.setdefaultencoding("utf-8")
+import time
+from PIL import ImageFont
+from PIL import Image
+from PIL import ImageDraw
+import tornado.ioloop
+import tornado.web
+
+import HyperLPRLite as pr
+import cv2
+import numpy as np
+import urllib
+import uuid
+import base64
+
+global model
+global fontC
+class MainHandler(tornado.web.RequestHandler):
+    def get(self):
+        self.write("Hello, world")
+class TestHandler(tornado.web.RequestHandler):
+    def drawRectBox(self,image,rect,addText):
+        global fontC
+        cv2.rectangle(image, (int(rect[0]), int(rect[1])), (int(rect[0] + rect[2]), int(rect[1] + rect[3])), (0,0, 255), 2,cv2.LINE_AA)
+        cv2.rectangle(image, (int(rect[0]-1), int(rect[1])-16), (int(rect[0] + 115), int(rect[1])), (0, 0, 255), -1, cv2.LINE_AA)
+        img = Image.fromarray(image)
+        draw = ImageDraw.Draw(img)
+        draw.text((int(rect[0]+1), int(rect[1]-16)), addText.decode("utf-8"), (255, 255, 255), font=fontC)
+        imagex = np.array(img)
+        return imagex
+
+    def get(self):
+        global model
+	img_path = self.get_argument("path", "null")
+	img_path = base64.b64decode(img_path)
+	if img_path.endswith(".jpg"):
+		img_name = str(uuid.uuid1()) + ".jpg"
+	if img_path.endswith(".png"):
+		img_name = str(uuid.uuid1()) + ".png"
+	response = urllib.urlopen(img_path)
+	cat_img = response.read()
+	with open('/tmp/plat/'+img_name,'wb') as f:
+	    f.write(cat_img)
+        grr = cv2.imread("/tmp/plat/" + img_name)
+        for pstr,confidence,rect in model.SimpleRecognizePlateByE2E(grr):
+            if confidence>0.7:
+                image = self.drawRectBox(grr, rect, pstr+" "+str(round(confidence,3)))
+                self.write(str(pstr))
+                #self.write(confidence)
+
+
+def make_app():
+    return tornado.web.Application([
+        (r"/", MainHandler),
+	(r"/test", TestHandler)
+    ])
+
+
+def init():
+    global model
+    global fontC
+    fontC = ImageFont.truetype("./Font/platech.ttf", 14, 0)
+    model = pr.LPR("model/cascade.xml","model/model12.h5","model/ocr_plate_all_gru.h5")
+    
+
+if __name__ == "__main__":
+    global model
+    init()
+    app = make_app()
+    app.listen(8888)
+    tornado.ioloop.IOLoop.current().start()
